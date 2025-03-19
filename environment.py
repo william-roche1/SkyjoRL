@@ -1,9 +1,9 @@
 import numpy as np
-
+import torch
 
 class SkyjoEnv:
     def __init__(self, n_players=4, n_cards=150):
-        self.grid_size = (3, 4)
+        self.grid_size = [3, 4]
         self.n_players = n_players
         self.n_cards = n_cards
 
@@ -39,8 +39,32 @@ class SkyjoEnv:
 
         return self.get_observation()
 
+    def get_valid_actions(self):
+        if self.player_turn[1] == 0: # Player has to draw a card
+            return [np.array([0,-1,-1,-1]), np.array([1,-1,-1,-1])]
+        else:
+            valid_actions = []
+            for i in range(self.grid_size[0]):
+                for j in range(self.grid_size[1]):
+                    valid_actions.append(torch.tensor([-1,1,i,j]))
+                    if self.players_deck_i_mask[self.player_turn[0]][i,j] == 0:
+                        valid_actions.append(np.array([-1,0,i,j]))
+            return valid_actions
+
+    
+    def get_sum_cards(self, player_id):
+        deck_values = self.players_deck_i_values[player_id]
+        deck_masks = self.players_deck_i_mask[player_id].astype(bool)
+        sum_visible = np.sum(deck_values[deck_masks])
+        sum_invisible = np.sum(1 - deck_masks.astype(int)) * 5.0667 # When the card is invisible, we assign the average value (np.mean(self.pile))
+        return sum_visible + sum_invisible
+
+
     def get_observation(self, player_id=None):
-        """Returns the current game state as an observation."""
+        """
+        Returns the current game state as an observation for a specific player id.
+        If no player_id is specified, return the observation for the player who needs to play.
+        """
         if player_id is None:
             player_id = self.player_turn[0]
         
@@ -65,19 +89,16 @@ class SkyjoEnv:
 
     def step(self, action):
         """Takes an action and updates the game state."""
-        reward = 0
         player_id = self.player_turn[0]
-        # TODO: reward ?
+    
         if self.player_turn[1] == 0:  # player has to draw a card
             if action[0] == 0:  # player takes from the draw pile
                 self.index_visible_card += 1  # the card drawn becomes the next visible card and will be used at next step
             self.player_turn[1] = 1
-
-        # TODO: coder un shuffle du paquet plutôt que de mettre fin au jeu
-        elif self.index_visible_card >= len(self.pile):
-            self.done = True
+            reward = 0 # Reward is set to 0 
 
         else:
+            sum_before_playing = self.get_sum_cards(player_id)
             i, j = action[2:]
             # the player has drawn a card and will either discard it and turn over a card face down, or will replace any card from its deck by the card drawn
             if (
@@ -94,6 +115,15 @@ class SkyjoEnv:
                     self.players_deck_i_mask[player_id][i,j] = 1
                 else:
                     raise ValueError(f"The card at the position {i,j} is already visible")
+            
+            # Drop a column if there is 3 times the same card
+            deck_values = self.players_deck_i_values[player_id]
+            deck_masks = self.players_deck_i_mask[player_id]
+            if np.all(deck_masks[:,j]) and np.all(deck_values[:,j] == deck_values[0,j]):
+                self.players_deck_i_values[player_id][:,j] *= 0
+
+            sum_after_playing = self.get_sum_cards(player_id)
+            reward = -(sum_after_playing - sum_before_playing)
 
             if (
                 np.sum(self.players_deck_i_mask[self.player_turn[0]]) == 12
@@ -104,6 +134,11 @@ class SkyjoEnv:
             if player_id == self.last_player:
                 self.done = True
 
-            self.player_turn = [(player_id + 1) % self.n_players, 0]
+        # Shuffle the cards if the draw pile is empty
+        if self.index_visible_card >= len(self.pile):
+            self.index_visible_card = self.n_players * 12
+            self.pile[self.index_visible_card:] = np.random.permutation(self.pile[self.index_visible_card:])
 
+            self.player_turn = [(player_id + 1) % self.n_players, 0]
+        
         return self.get_observation(), reward, self.done
