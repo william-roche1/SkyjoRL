@@ -1,4 +1,6 @@
 import numpy as np
+from collections import namedtuple, deque
+import random
 
 # Baseline agent to evaluate our other agents' performance
 
