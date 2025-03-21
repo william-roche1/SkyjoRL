@@ -2,10 +2,11 @@ import numpy as np
 import torch
 
 class SkyjoEnv:
-    def __init__(self, n_players=4, n_cards=150):
+    def __init__(self, n_players=4, n_cards=150, device=torch.device("cpu")):
         self.grid_size = [3, 4]
         self.n_players = n_players
         self.n_cards = n_cards
+        self.device = device
 
         self.reset()
 
@@ -39,16 +40,16 @@ class SkyjoEnv:
 
         return self.get_observation()
 
-    def get_valid_actions(self):
-        if self.player_turn[1] == 0: # Player has to draw a card
-            return [torch.tensor([0,-1,-1,-1]), torch.tensor([1,-1,-1,-1])]
+    def get_valid_actions(self, player_turn, deck_mask, device=torch.device("cpu")):
+        if player_turn[1] == 0: # Player has to draw a card
+            return [torch.tensor([0,-1,-1,-1], device=device), torch.tensor([1,-1,-1,-1], device=device)]
         else:
             valid_actions = []
-            for i in range(self.grid_size[0]):
-                for j in range(self.grid_size[1]):
-                    valid_actions.append(torch.tensor([-1,1,i,j]))
-                    if self.players_deck_i_mask[self.player_turn[0]][i,j] == 0:
-                        valid_actions.append(torch.tensor([-1,0,i,j]))
+            for i in range(deck_mask.shape[0]):
+                for j in range(deck_mask.shape[1]):
+                    valid_actions.append(torch.tensor([-1,1,i,j], device=device))
+                    if deck_mask[i,j] == 0:
+                        valid_actions.append(torch.tensor([-1,0,i,j], device=device))
             return valid_actions
 
     
@@ -92,8 +93,8 @@ class SkyjoEnv:
         deck_values = self.players_deck_i_values[player_id]
         deck_masks = self.players_deck_i_mask[player_id]
     
-        valid_actions = self.get_valid_actions()
-        if not any(np.array_equal(action, x) for x in valid_actions):
+        valid_actions = self.get_valid_actions(self.player_turn, deck_masks, device=self.device)
+        if not any(torch.equal(action, x) for x in valid_actions):
             raise ValueError(f"Unauthorized action: {action}")
 
         if self.player_turn[1] == 0:  # player has to draw a card
